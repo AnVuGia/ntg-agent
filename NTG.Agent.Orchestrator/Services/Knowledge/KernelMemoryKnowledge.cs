@@ -25,37 +25,53 @@ public class KernelMemoryKnowledge : IKnowledgeService
         await _kernelMemory.DeleteDocumentAsync(documentId, cancellationToken: cancellationToken);
     }
     public async Task<SearchResult> SearchAsync(string query, Guid agentId, List<string> tags, CancellationToken cancellationToken = default)
-    {
-        SearchResult result;
-        var filters = ComposeFilters(agentId, tags);
-        if (filters.Count > 0)
-        {
-            result = await _kernelMemory.SearchAsync(
-                query: query,
-                filters: filters,
-                limit: 3,
-                cancellationToken: cancellationToken);
-        }
-        else
-        {
-            result = await _kernelMemory.SearchAsync(
-                query: query,
-                limit: 3,
-                cancellationToken: cancellationToken);
-        }
+{
+    // 1. Log that the retrieval process is starting
+    _logger.LogInformation("[KNOWLEDGE BASE] Searching internal knowledge for query: '{Query}' with tags: [{Tags}]", query, string.Join(", ", tags));
 
-        if (_logger.IsEnabled(LogLevel.Debug))
-        {
-            _logger.LogDebug("KernelMemoryKnowledge.SearchAsync: {Query}, tags:{Tags} => {Result}", query, string.Join(", ", tags), result.ToJson());
-        }
-        return result;
+    SearchResult result;
+    var filters = ComposeFilters(agentId, tags);
+    
+    if (filters.Count > 0)
+    {
+        result = await _kernelMemory.SearchAsync(
+            query: query,
+            filters: filters,
+            limit: 3,
+            cancellationToken: cancellationToken);
+    }
+    else
+    {
+        result = await _kernelMemory.SearchAsync(
+            query: query,
+            limit: 3,
+            cancellationToken: cancellationToken);
     }
 
-    public async Task<SearchResult> SearchAsync(string query, Guid agentId, Guid userId, CancellationToken cancellationToken = default)
+    // 2. Existing debug log showing the actual payload/results
+    if (_logger.IsEnabled(LogLevel.Debug))
     {
-        var result = await _kernelMemory.SearchAsync(query, cancellationToken: cancellationToken);
-        return result;
+        _logger.LogDebug("[KNOWLEDGE BASE] KernelMemoryKnowledge.SearchAsync: {Query}, tags:{Tags} => {Result}", query, string.Join(", ", tags), result.ToJson());
     }
+    
+    return result;
+}
+
+public async Task<SearchResult> SearchAsync(string query, Guid agentId, Guid userId, CancellationToken cancellationToken = default)
+{
+    // 1. Log that the retrieval process is starting
+    _logger.LogInformation("[KNOWLEDGE BASE] Searching internal knowledge for query: '{Query}' (AgentId: {AgentId}, UserId: {UserId})", query, agentId, userId);
+
+    var result = await _kernelMemory.SearchAsync(query, cancellationToken: cancellationToken);
+
+    // 2. Log the outcome of the retrieval
+    if (_logger.IsEnabled(LogLevel.Debug))
+    {
+        _logger.LogDebug("[KNOWLEDGE BASE] KernelMemoryKnowledge.SearchAsync complete for query: '{Query}'. Found {Count} results.", query, result.Results.Count);
+    }
+
+    return result;
+}
 
     public async Task<string> ImportWebPageAsync(string url, Guid agentId, List<string> tags, CancellationToken cancellationToken = default)
     {
