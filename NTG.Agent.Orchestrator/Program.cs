@@ -19,6 +19,8 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using NTG.Agent.Orchestrator.Services.Quota;
+using NTG.Agent.Orchestrator.Models.Quota;
 
 const string SourceName = "NTG.Agent.Orchestrator";
 const string ServiceName = "Orchestrator";
@@ -26,39 +28,50 @@ const string ServiceName = "Orchestrator";
 var builder = WebApplication.CreateBuilder(args);
 
 // Endpoint to the Aspire Dashboard
-var endpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"] ?? throw new ConfigurationException("OTEL_EXPORTER_OTLP_ENDPOINT configuration key is required but not found");
+var endpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
 
 var resourceBuilder = ResourceBuilder
     .CreateDefault()
     .AddService(ServiceName);
 
-using var tracerProvider = Sdk.CreateTracerProviderBuilder()
+var tracerProviderBuilder = Sdk.CreateTracerProviderBuilder()
     .SetResourceBuilder(resourceBuilder)
     .AddSource(SourceName)
     .AddSource("*Microsoft.Extensions.AI") // Listen to the Experimental.Microsoft.Extensions.AI source for chat client telemetry
-    .AddSource("*Microsoft.Extensions.Agents*") // Listen to the Experimental.Microsoft.Extensions.Agents source for agent telemetry
-    .AddOtlpExporter(options => options.Endpoint = new Uri(endpoint))
-    .Build();
+    .AddSource("*Microsoft.Extensions.Agents*"); // Listen to the Experimental.Microsoft.Extensions.Agents source for agent telemetry
 
-using var meterProvider = Sdk.CreateMeterProviderBuilder()
+if (!string.IsNullOrEmpty(endpoint))
+{
+    tracerProviderBuilder.AddOtlpExporter(options => options.Endpoint = new Uri(endpoint));
+}
+using var tracerProvider = tracerProviderBuilder.Build();
+
+var meterProviderBuilder = Sdk.CreateMeterProviderBuilder()
     .SetResourceBuilder(resourceBuilder)
     .AddMeter(SourceName)
-    .AddMeter("*Microsoft.Agents.AI") // Agent Framework metrics
-    .AddOtlpExporter(options => options.Endpoint = new Uri(endpoint))
-    .Build();
+    .AddMeter("*Microsoft.Agents.AI"); // Agent Framework metrics
 
-using var loggerFactory = LoggerFactory.Create(builder =>
+if (!string.IsNullOrEmpty(endpoint))
+{
+    meterProviderBuilder.AddOtlpExporter(options => options.Endpoint = new Uri(endpoint));
+}
+using var meterProvider = meterProviderBuilder.Build();
+
+using var loggerFactory = LoggerFactory.Create(logBuilder =>
 {
     // Add OpenTelemetry as a logging provider
-    builder.AddOpenTelemetry(options =>
+    logBuilder.AddOpenTelemetry(options =>
     {
         options.SetResourceBuilder(resourceBuilder);
-        options.AddOtlpExporter(options => options.Endpoint = new Uri(endpoint));
+        if (!string.IsNullOrEmpty(endpoint))
+        {
+            options.AddOtlpExporter(opt => opt.Endpoint = new Uri(endpoint));
+        }
         // Format log messages. This is default to false.
         options.IncludeFormattedMessage = true;
         options.IncludeScopes = true;
     });
-    builder.SetMinimumLevel(LogLevel.Debug);
+    logBuilder.SetMinimumLevel(LogLevel.Debug);
 });
 
 using var activitySource = new ActivitySource(SourceName);
@@ -71,10 +84,18 @@ var responseTimeHistogram = meter.CreateHistogram<double>("agent_response_time_s
 builder.AddServiceDefaults();
 
 builder.Services.AddDbContext<AgentDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+{
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+    if (builder.Configuration.GetValue<bool>("EntityFramework:EnableSensitiveDataLogging"))
+    {
+        options.EnableSensitiveDataLogging();
+    }
+});
 
 builder.Services.Configure<LongTermMemorySettings>(builder.Configuration.GetSection("LongTermMemory"));
 builder.Services.Configure<DocumentIntelligenceSettings>(builder.Configuration.GetSection("Azure:DocumentIntelligence"));
+builder.Services.Configure<QuotaSettings>(builder.Configuration.GetSection("QuotaSettings"));
+builder.Services.AddScoped<IUserQuotaService, UserQuotaService>();
 
 builder.Services.AddControllers();
 

@@ -1,4 +1,4 @@
-﻿﻿@using NTG.Agent.Common.Dtos.Chats
+﻿@using NTG.Agent.Common.Dtos.Chats
 @using NTG.Agent.Common.Dtos.Enums
 @using NTG.Agent.Common.Dtos.SharedConversations
 @using NTG.Agent.Common.Dtos.Agents
@@ -546,10 +546,18 @@ else
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
         {
-            // Handle 429 rate limit response
-            response.Message = "You have reached your message limit. Please sign in to continue chatting.";
-            await LoadRateLimitStatus();
-            showRateLimitModal = true;
+            if (!string.IsNullOrEmpty(ex.Message) && !ex.Message.Contains("Response status code does not indicate success"))
+            {
+                // Show the specific quota error message inline
+                response.Message = ex.Message;
+            }
+            else
+            {
+                // Handle default 429 rate limit response
+                response.Message = "You have reached your message limit. Please sign in to continue chatting.";
+                await LoadRateLimitStatus();
+                showRateLimitModal = true;
+            }
             StateHasChanged();
         }
         catch (Exception ex)

@@ -51,7 +51,18 @@ public class AgentsControllerTests
             Mock.Of<ILogger<AgentService>>()
         );
 
-        _controller = new AgentsController(_mockAgentService.Object, _context)
+        // Create mocks for the new Quota dependencies
+        var mockQuotaService = new Mock<NTG.Agent.Orchestrator.Services.Quota.IUserQuotaService>();
+        var mockLogger = new Mock<ILogger<AgentsController>>();
+        var mockOptions = new Mock<Microsoft.Extensions.Options.IOptions<NTG.Agent.Orchestrator.Models.Quota.QuotaSettings>>();
+
+        // Instantiate controller with ALL required parameters
+        _controller = new AgentsController(
+            _mockAgentService.Object, 
+            _context, 
+            mockQuotaService.Object, 
+            mockLogger.Object, 
+            mockOptions.Object)
         {
             ControllerContext = new ControllerContext
             {

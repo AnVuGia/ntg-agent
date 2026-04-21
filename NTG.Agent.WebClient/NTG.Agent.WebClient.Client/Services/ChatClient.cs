@@ -1,4 +1,4 @@
-﻿using NTG.Agent.Common.Dtos.Chats;
+using NTG.Agent.Common.Dtos.Chats;
 using System.Net.Http.Json;
 using NTG.Agent.WebClient.Client.Dtos;
 using System.Globalization;
@@ -65,7 +65,28 @@ public class ChatClient(HttpClient httpClient)
         // --- 3️ Send request, reading headers-first so the response can be streamed ---
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, REQUEST_URI) { Content = form };
         using var response = await httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        
+        if (!response.IsSuccessStatusCode)
+        {
+            if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            {
+                try
+                {
+                    var errorStr = await response.Content.ReadAsStringAsync(cancellationToken);
+                    using var doc = System.Text.Json.JsonDocument.Parse(errorStr);
+                    if (doc.RootElement.TryGetProperty("message", out var msgProp) || doc.RootElement.TryGetProperty("Message", out msgProp))
+                    {
+                        var customMessage = msgProp.GetString();
+                        if (!string.IsNullOrEmpty(customMessage))
+                        {
+                            throw new HttpRequestException(customMessage, null, System.Net.HttpStatusCode.TooManyRequests);
+                        }
+                    }
+                }
+                catch { /* Fall through to default EnsureSuccessStatusCode */ }
+            }
+            response.EnsureSuccessStatusCode();
+        }
 
         var stream = response.Content.ReadFromJsonAsAsyncEnumerable<PromptResponse>(cancellationToken: cancellationToken);
         if (stream is null) yield break;

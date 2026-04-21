@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NTG.Agent.Common.Dtos.Agents;
 using NTG.Agent.Common.Dtos.Chats;
@@ -6,6 +6,9 @@ using NTG.Agent.Orchestrator.Services.Agents;
 using NTG.Agent.Orchestrator.Data;
 using NTG.Agent.Orchestrator.Dtos;
 using NTG.Agent.Orchestrator.Extentions;
+using NTG.Agent.Orchestrator.Services.Quota;
+using NTG.Agent.Orchestrator.Models.Quota;
+using Microsoft.Extensions.Options;
 
 namespace NTG.Agent.Orchestrator.Controllers;
 
@@ -15,10 +18,22 @@ public class AgentsController : ControllerBase
 {
     private readonly AgentService _agentService;
     private readonly AgentDbContext _agentDbContext;
-    public AgentsController(AgentService agentService, AgentDbContext agentDbContext)
+    private readonly IUserQuotaService _quotaService;
+    private readonly ILogger<AgentsController> _logger;
+    private readonly QuotaSettings _settings;
+
+    public AgentsController(
+        AgentService agentService, 
+        AgentDbContext agentDbContext,
+        IUserQuotaService quotaService,
+        ILogger<AgentsController> logger,
+        IOptions<QuotaSettings> settings)
     {
         _agentService = agentService ?? throw new ArgumentNullException(nameof(agentService));
         _agentDbContext = agentDbContext;
+        _quotaService = quotaService;
+        _logger = logger;
+        _settings = settings.Value;
     }
 
     /// <summary>
@@ -30,13 +45,33 @@ public class AgentsController : ControllerBase
     /// <param name="promptRequest">The prompt request containing the input data for generating chat responses.</param>
     /// <returns>An asynchronous stream of <see cref="PromptResponse"/> objects, each representing a response to the prompt.</returns>
     [HttpPost("chat")]
-    public async IAsyncEnumerable<PromptResponse> ChatAsync([FromForm] PromptRequestForm promptRequest)
+    public async Task<IActionResult> ChatAsync([FromForm] PromptRequestForm promptRequest)
     {
         Guid? userId = User.GetUserId();
-        await foreach (var response in _agentService.ChatStreamingAsync(userId, promptRequest))
+        
+        Guid? sessionId = null;
+        if (!string.IsNullOrWhiteSpace(promptRequest.SessionId) && Guid.TryParse(promptRequest.SessionId, out var parsedSessionId))
         {
-            yield return response;
+            sessionId = parsedSessionId;
         }
+
+        var quotaResult = await _quotaService.CheckQuotaAsync(userId, sessionId, promptRequest.Prompt);
+
+        if (!quotaResult.IsAllowed)
+        {
+            _logger.LogWarning(
+                "QUOTA EXHAUSTED: User {UserId} / Session {SessionId} attempted prompt of {EstimatedTokens} tokens. Remaining: {RemainingTokens}.",
+                userId, sessionId, quotaResult.EstimatedTokens, quotaResult.RemainingTokens);
+
+            return StatusCode(StatusCodes.Status429TooManyRequests, new 
+            { 
+                ErrorCode = "QUOTA_EXCEEDED", 
+                Message = $"Your prompt requires ~{quotaResult.EstimatedTokens} tokens, but you only have {quotaResult.RemainingTokens} tokens left in your {_settings.ResetPeriodHours}-hour window.",
+                RemainingTokens = quotaResult.RemainingTokens
+            });
+        }
+
+        return Ok(_agentService.ChatStreamingAsync(userId, promptRequest));
     }
 
     /// <summary>
