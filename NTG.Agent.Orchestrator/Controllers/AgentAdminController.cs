@@ -6,6 +6,7 @@ using NTG.Agent.Common.Dtos.Agents;
 using NTG.Agent.Orchestrator.Services.Agents;
 using NTG.Agent.Orchestrator.Data;
 using NTG.Agent.Orchestrator.Extentions;
+using System.Net.Http.Json;
 
 namespace NTG.Agent.Orchestrator.Controllers;
 
@@ -16,12 +17,14 @@ public class AgentAdminController : ControllerBase
 {
     private readonly AgentDbContext _agentDbContext;
     private readonly IAgentFactory _agentFactory;
+    private readonly IHttpClientFactory _httpClientFactory;
 
     public AgentAdminController(AgentDbContext agentDbContext,
-        IAgentFactory agentFactory
-        )
+        IAgentFactory agentFactory,
+        IHttpClientFactory httpClientFactory)
     {
         _agentDbContext = agentDbContext ?? throw new ArgumentNullException(nameof(agentDbContext));
+        _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _agentFactory = agentFactory ?? throw new ArgumentNullException(nameof(agentFactory));
     }
 
@@ -261,19 +264,104 @@ public class AgentAdminController : ControllerBase
     }
 
 
+    [HttpPost("test-connection")]
+    public async Task<IActionResult> TestConnection([FromBody] ProviderConfig config)
+    {
+        try
+        {
+            var http = _httpClientFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(15);
+
+            if (config.ProviderName is "Anthropic")
+            {
+                http.DefaultRequestHeaders.Add("x-api-key", config.ProviderApiKey ?? "");
+                http.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
+                var body = new { model = config.ProviderModelName, max_tokens = 10, messages = new[] { new { role = "user", content = "hi" } } };
+                var response = await http.PostAsJsonAsync("https://api.anthropic.com/v1/messages", body);
+                var text = await response.Content.ReadAsStringAsync();
+                return Ok(response.IsSuccessStatusCode
+                    ? new ProviderTestResult(true, "Connected")
+                    : new ProviderTestResult(false, text));
+            }
+            else
+            {
+                var baseUrl = string.IsNullOrWhiteSpace(config.ProviderEndpoint)
+                    ? "https://api.openai.com/v1"
+                    : config.ProviderEndpoint.TrimEnd('/');
+                http.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", config.ProviderApiKey ?? "");
+                var body = new { model = config.ProviderModelName, max_completion_tokens = 10, messages = new[] { new { role = "user", content = "hi" } } };
+                var response = await http.PostAsJsonAsync($"{baseUrl}/chat/completions", body);
+                var text = await response.Content.ReadAsStringAsync();
+                return Ok(response.IsSuccessStatusCode
+                    ? new ProviderTestResult(true, "Connected")
+                    : new ProviderTestResult(false, $"Status: {(int)response.StatusCode} — {text}"));
+            }
+        }
+        catch (Exception ex)
+        {
+            return Ok(new ProviderTestResult(false, ex.Message));
+        }
+    }
+
+    [HttpPost("list-models")]
+    public async Task<IActionResult> ListModels([FromBody] ProviderConfig config)
+    {
+        try
+        {
+            var http = _httpClientFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(10);
+
+            List<string> modelIds;
+
+            if (config.ProviderName is "Anthropic")
+            {
+                http.DefaultRequestHeaders.Add("x-api-key", config.ProviderApiKey ?? "");
+                http.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
+                var response = await http.GetFromJsonAsync<AnthropicModelsResponse>("https://api.anthropic.com/v1/models");
+                modelIds = response?.Data?.Select(m => m.Id).ToList() ?? [];
+            }
+            else
+            {
+                var baseUrl = string.IsNullOrWhiteSpace(config.ProviderEndpoint)
+                    ? "https://api.openai.com/v1"
+                    : config.ProviderEndpoint.TrimEnd('/');
+                http.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", config.ProviderApiKey ?? "");
+                var response = await http.GetFromJsonAsync<OpenAIModelsResponse>($"{baseUrl}/models");
+                modelIds = response?.Data?.Select(m => m.Id).ToList() ?? [];
+            }
+
+            return Ok(new ProviderModelsResult(modelIds, null));
+        }
+        catch (Exception ex)
+        {
+            return Ok(new ProviderModelsResult([], ex.Message));
+        }
+    }
+
+    private record OpenAIModelsResponse(
+        [property: System.Text.Json.Serialization.JsonPropertyName("data")] List<OpenAIModelItem>? Data);
+    private record OpenAIModelItem(
+        [property: System.Text.Json.Serialization.JsonPropertyName("id")] string Id);
+    private record AnthropicModelsResponse(
+        [property: System.Text.Json.Serialization.JsonPropertyName("data")] List<AnthropicModelItem>? Data);
+    private record AnthropicModelItem(
+        [property: System.Text.Json.Serialization.JsonPropertyName("id")] string Id);
+
     /// <summary>
     /// Connects an agent to a Model Context Protocol (MCP) server and retrieves available tools.
     /// </summary>
     /// <remarks>
-    /// This endpoint establishes a connection to an MCP server using the provided endpoint URL 
-    /// and retrieves all available tools from that server. The tools are then merged with the 
+    /// This endpoint establishes a connection to an MCP server using the provided endpoint URL
+    /// and retrieves all available tools from that server. The tools are then merged with the
     /// agent's existing tool configuration to show which tools are enabled.
     /// Only users with Admin role can access this endpoint.
     /// </remarks>
     /// <param name="id">The unique identifier (GUID) of the agent to connect to the MCP server.</param>
     /// <param name="endpoint">The MCP server endpoint URL to connect to.</param>
     /// <returns>
-    /// An <see cref="IEnumerable{AgentToolDto}"/> containing the list of available tools from the MCP server 
+    /// An <see cref="IEnumerable{AgentToolDto}"/> containing the list of available tools from the MCP server
     /// merged with the agent's current tool configuration.
     /// </returns>
     /// <response code="200">Returns the list of MCP tools successfully</response>

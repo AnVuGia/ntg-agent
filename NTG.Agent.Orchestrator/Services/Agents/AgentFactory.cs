@@ -12,6 +12,7 @@ using NTG.Agent.Orchestrator.Data;
 using OpenAI;
 using OpenAI.Responses;
 using System.ClientModel;
+using System.ClientModel.Primitives;
 using OpenAI.Chat;
 
 namespace NTG.Agent.Orchestrator.Services.Agents;
@@ -39,6 +40,7 @@ public class AgentFactory : IAgentFactory
             "GitHubModel" => await CreateOpenAIAgentAsync(agentConfig),
             "GoogleGemini" => await CreateOpenAIAgentAsync(agentConfig),
             "OpenAI" => await CreateOpenAIAgentAsync(agentConfig),
+            "CustomOpenAI" => await CreateOpenAIAgentAsync(agentConfig),
             "AzureOpenAI" => await CreateAzureOpenAIAgentAsync(agentConfig),
             "Anthropic" => await CreateAnthropicAgentAsync(agentConfig),
             _ => throw new NotSupportedException($"Agent provider '{agentProvider}' is not supported."),
@@ -57,6 +59,7 @@ public class AgentFactory : IAgentFactory
             "GitHubModel" => CreateBasicOpenAIAgent(agentConfig, instructions),
             "GoogleGemini" => CreateBasicOpenAIAgent(agentConfig, instructions),
             "OpenAI" => CreateBasicOpenAIAgent(agentConfig, instructions),
+            "CustomOpenAI" => CreateBasicOpenAIAgent(agentConfig, instructions),
             "AzureOpenAI" => CreateBasicAzureOpenAIAgent(agentConfig, instructions),
             "Anthropic" => CreateBasicAnthropicAgent(agentConfig, instructions),
             _ => throw new NotSupportedException($"Agent provider '{agentProvider}' is not supported."),
@@ -67,9 +70,10 @@ public class AgentFactory : IAgentFactory
     {
         // ProviderEndpoint is optional for standard OpenAI; GitHub Models and Google Gemini require a custom endpoint.
         var clientOptions = new OpenAIClientOptions();
+        clientOptions.AddPolicy(new NeutralUserAgentPolicy(), PipelinePosition.PerCall);
         if (!string.IsNullOrWhiteSpace(agentConfig.ProviderEndpoint))
         {
-            clientOptions.Endpoint = new Uri(agentConfig.ProviderEndpoint);
+            clientOptions.Endpoint = new Uri(agentConfig.ProviderEndpoint.TrimEnd('/') + "/");
         }
 
         var openAiClient = new OpenAIClient(new ApiKeyCredential(agentConfig.ProviderApiKey), clientOptions);
@@ -106,8 +110,14 @@ public class AgentFactory : IAgentFactory
             // o-series reasoning models (o3, o4-mini, etc.) require the Responses API (/v1/responses).
             // o.Reasoning surfaces chain-of-thought tokens as TextReasoningContent in the stream.
             // See: https://github.com/microsoft/agent-framework/blob/main/dotnet/samples/02-agents/AgentWithOpenAI/Agent_OpenAI_Step02_Reasoning/Program.cs
+            var thinkingClientOptions = new OpenAIClientOptions();
+            thinkingClientOptions.AddPolicy(new NeutralUserAgentPolicy(), PipelinePosition.PerCall);
+            if (!string.IsNullOrWhiteSpace(agent.ProviderEndpoint))
+            {
+                thinkingClientOptions.Endpoint = new Uri(agent.ProviderEndpoint.TrimEnd('/') + "/");
+            }
 #pragma warning disable OPENAI001
-            chatClient = new OpenAIClient(new ApiKeyCredential(agent.ProviderApiKey))
+            chatClient = new OpenAIClient(new ApiKeyCredential(agent.ProviderApiKey), thinkingClientOptions)
                 .GetResponsesClient()
                 .AsIChatClient(agent.ProviderModelName)
                 .AsBuilder()
@@ -127,7 +137,8 @@ public class AgentFactory : IAgentFactory
         else
         {
             // Standard models use Chat Completions API.
-            var clientOptions = new OpenAIClientOptions { Endpoint = new Uri(agent.ProviderEndpoint) };
+            var clientOptions = new OpenAIClientOptions { Endpoint = new Uri(agent.ProviderEndpoint.TrimEnd('/') + "/") };
+            clientOptions.AddPolicy(new NeutralUserAgentPolicy(), PipelinePosition.PerCall);
             chatClient = new OpenAIClient(new ApiKeyCredential(agent.ProviderApiKey), clientOptions)
                 .GetChatClient(agent.ProviderModelName)
                 .AsIChatClient()
@@ -306,5 +317,22 @@ public class AgentFactory : IAgentFactory
         var tools = await mcpClient.ListToolsAsync().ConfigureAwait(false);
 
         return tools.Cast<AITool>();
+    }
+
+    // Some custom OpenAI-compatible routers block the default azsdk-net User-Agent.
+    // This policy replaces it with a neutral value before the request is sent.
+    private sealed class NeutralUserAgentPolicy : PipelinePolicy
+    {
+        public override void Process(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex)
+        {
+            message.Request.Headers.Set("User-Agent", "NTG-Agent/1.0");
+            ProcessNext(message, pipeline, currentIndex);
+        }
+
+        public override async ValueTask ProcessAsync(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex)
+        {
+            message.Request.Headers.Set("User-Agent", "NTG-Agent/1.0");
+            await ProcessNextAsync(message, pipeline, currentIndex);
+        }
     }
 }

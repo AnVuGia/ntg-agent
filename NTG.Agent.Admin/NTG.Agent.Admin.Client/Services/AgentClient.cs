@@ -79,4 +79,22 @@ public class AgentClient(HttpClient httpClient)
         var response = await httpClient.PatchAsJsonAsync($"api/agentadmin/{id}/publish", isPublished);
         response.EnsureSuccessStatusCode();
     }
+
+    public async Task<ProviderModelsResult> ListModelsAsync(AgentDetail config)
+    {
+        var payload = new ProviderConfig(config.ProviderName, config.ProviderEndpoint, config.ProviderApiKey, config.ProviderModelName);
+        var response = await httpClient.PostAsJsonAsync("api/agentadmin/list-models", payload);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ProviderModelsResult>()
+            ?? new ProviderModelsResult([], "No response.");
+    }
+
+    public async Task<ProviderTestResult> TestConnectionAsync(AgentDetail config)
+    {
+        var payload = new ProviderConfig(config.ProviderName, config.ProviderEndpoint, config.ProviderApiKey, config.ProviderModelName);
+        var response = await httpClient.PostAsJsonAsync("api/agentadmin/test-connection", payload);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ProviderTestResult>()
+            ?? new ProviderTestResult(false, "No response.");
+    }
 }

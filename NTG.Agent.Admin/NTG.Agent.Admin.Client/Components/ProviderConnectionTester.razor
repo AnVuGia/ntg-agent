@@ -1,0 +1,103 @@
+@using NTG.Agent.Common.Dtos.Agents
+@inject AgentClient AgentClient
+
+<div class="d-flex align-items-center gap-2 flex-wrap">
+    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="TestConnection" disabled="@(isTesting || Disabled)">
+        @if (isTesting)
+        {
+            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+        }
+        else
+        {
+            <i class="bi bi-plug me-1"></i>
+        }
+        Test Connection
+    </button>
+    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="FetchModels" disabled="@(isFetchingModels || Disabled)">
+        @if (isFetchingModels)
+        {
+            <span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+        }
+        else
+        {
+            <i class="bi bi-collection me-1"></i>
+        }
+        Fetch Models
+    </button>
+    @if (testResult != null)
+    {
+        <span class="badge @(testResult.Success ? "bg-success" : "bg-danger")">
+            @(testResult.Success ? "Connected" : "Failed") — @testResult.Message
+        </span>
+    }
+</div>
+@if (!string.IsNullOrEmpty(fetchError))
+{
+    <div class="alert alert-danger d-flex align-items-center mt-2 mb-0" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+        <div>Could not fetch models: @fetchError</div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public AgentDetail AgentDetail { get; set; } = null!;
+
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    [Parameter]
+    public EventCallback<IList<string>> OnModelsFetched { get; set; }
+
+    private bool isTesting;
+    private bool isFetchingModels;
+    private ProviderTestResult? testResult;
+    private string? fetchError;
+
+    private async Task TestConnection()
+    {
+        isTesting = true;
+        testResult = null;
+        try
+        {
+            testResult = await AgentClient.TestConnectionAsync(AgentDetail);
+        }
+        catch (Exception ex)
+        {
+            testResult = new ProviderTestResult(false, ex.Message);
+        }
+        finally
+        {
+            isTesting = false;
+        }
+    }
+
+    private async Task FetchModels()
+    {
+        if (isFetchingModels) return;
+        isFetchingModels = true;
+        fetchError = null;
+        try
+        {
+            var result = await AgentClient.ListModelsAsync(AgentDetail);
+            if (!string.IsNullOrEmpty(result.Error))
+            {
+                fetchError = result.Error;
+                await OnModelsFetched.InvokeAsync([]);
+            }
+            else
+            {
+                await OnModelsFetched.InvokeAsync(result.Models);
+            }
+        }
+        catch (Exception ex)
+        {
+            fetchError = ex.Message;
+            await OnModelsFetched.InvokeAsync([]);
+        }
+        finally
+        {
+            isFetchingModels = false;
+        }
+    }
+}

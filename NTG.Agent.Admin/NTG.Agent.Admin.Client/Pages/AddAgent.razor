@@ -138,6 +138,7 @@
                                     <option value="GoogleGemini">Google Gemini</option>
                                     <option value="OpenAI">OpenAI</option>
                                     <option value="Anthropic">Anthropic</option>
+                                    <option value="CustomOpenAI">Custom OpenAI Compatible</option>
                                 </select>
                             </div>
 
@@ -145,8 +146,24 @@
                                 <label for="providerModelName" class="form-label fw-semibold">
                                     Model Name <span class="text-muted">(Optional)</span>
                                 </label>
-                                <InputText id="providerModelName" class="form-control" @bind-Value="agentDetail.ProviderModelName" 
-                                           placeholder="e.g., gpt-4, gpt-3.5-turbo" disabled="@isSubmitting" />
+                                @if (availableModels.Count > 0)
+                                {
+                                    <select id="providerModelName" class="form-select" disabled="@isSubmitting" @bind="agentDetail.ProviderModelName">
+                                        <option value="">-- Select a model --</option>
+                                        @foreach (var model in availableModels)
+                                        {
+                                            <option value="@model">@model</option>
+                                        }
+                                    </select>
+                                    <button type="button" class="btn btn-link btn-sm p-0 mt-1" @onclick="ClearAvailableModels" disabled="@isSubmitting">
+                                        Type manually
+                                    </button>
+                                }
+                                else
+                                {
+                                    <InputText id="providerModelName" class="form-control" @bind-Value="agentDetail.ProviderModelName"
+                                               placeholder="e.g., gpt-4, gpt-3.5-turbo" disabled="@isSubmitting" />
+                                }
                             </div>
                         </div>
 
@@ -154,7 +171,7 @@
                             <label for="providerEndpoint" class="form-label fw-semibold">
                                 Provider Endpoint <span class="text-muted">(Optional)</span>
                             </label>
-                            <InputText id="providerEndpoint" class="form-control" @bind-Value="agentDetail.ProviderEndpoint" 
+                            <InputText id="providerEndpoint" class="form-control" @bind-Value="agentDetail.ProviderEndpoint"
                                        placeholder="https://api.openai.com/v1" disabled="@isSubmitting" />
                         </div>
 
@@ -170,6 +187,10 @@
                                     <i class="bi @(showApiKey ? "bi-eye-slash" : "bi-eye")"></i>
                                 </button>
                             </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <ProviderConnectionTester AgentDetail="agentDetail" Disabled="isSubmitting" OnModelsFetched="OnModelsFetched" />
                         </div>
 
                         <div class="mb-4">
@@ -253,6 +274,7 @@
     private string? errorMessage;
     private bool isDuplicating => SourceAgentId.HasValue;
     private string sourceAgentName = string.Empty;
+    private IList<string> availableModels = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -338,6 +360,16 @@
         {
             isSubmitting = false;
         }
+    }
+
+    private void OnModelsFetched(IList<string> models)
+    {
+        availableModels = models;
+    }
+
+    private void ClearAvailableModels()
+    {
+        availableModels = [];
     }
 
     private void NavigateBack()

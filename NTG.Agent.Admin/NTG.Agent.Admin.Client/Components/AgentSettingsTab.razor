@@ -27,13 +27,14 @@
                                     <option value="GoogleGemini">Google Gemini</option>
                                     <option value="OpenAI">OpenAI</option>
                                     <option value="Anthropic">Anthropic</option>
+                                    <option value="CustomOpenAI">Custom OpenAI Compatible</option>
                                 </select>
                             </div>
                             <div class="mb-3">
                                 <label class="form-label small">Provider Endpoint</label>
                                 <InputText id="providerEndpoint"
                                            @bind-Value="AgentDetail.ProviderEndpoint"
-                                           class="form-control" 
+                                           class="form-control"
                                            placeholder="Enter the API endpoint URL..." />
                             </div>
                             <div class="mb-3">
@@ -52,10 +53,29 @@
                             </div>
                             <div class="mb-3">
                                 <label class="form-label small">Provider Model Name</label>
-                                <InputText id="providerModelName"
-                                           @bind-Value="AgentDetail.ProviderModelName"
-                                           class="form-control"
-                                           placeholder="Enter the Model Name..." />
+                                @if (availableModels.Count > 0)
+                                {
+                                    <select class="form-select form-select-sm" @bind="AgentDetail.ProviderModelName">
+                                        <option value="">-- Select a model --</option>
+                                        @foreach (var model in availableModels)
+                                        {
+                                            <option value="@model">@model</option>
+                                        }
+                                    </select>
+                                    <button type="button" class="btn btn-link btn-sm p-0 mt-1" @onclick="ClearAvailableModels">
+                                        Type manually
+                                    </button>
+                                }
+                                else
+                                {
+                                    <InputText id="providerModelName"
+                                               @bind-Value="AgentDetail.ProviderModelName"
+                                               class="form-control"
+                                               placeholder="Enter the Model Name..." />
+                                }
+                            </div>
+                            <div class="mb-3">
+                                <ProviderConnectionTester AgentDetail="AgentDetail" OnModelsFetched="OnModelsFetched" />
                             </div>
                             <label for="description" class="form-label fw-semibold">
                                 <i class="bi bi-info-square me-2"></i>Description
@@ -217,6 +237,7 @@ You are a helpful AI assistant specialized in customer support. Always be polite
     private bool isSaving = false;
     private bool isSuccess = false;
     private bool showApiKey = false;
+    private IList<string> availableModels = [];
     
     // Advanced settings
     private double temperature = 0.7;
@@ -249,6 +270,16 @@ You are a helpful AI assistant specialized in customer support. Always be polite
         {
             isSaving = false;
         }
+    }
+
+    private void OnModelsFetched(IList<string> models)
+    {
+        availableModels = models;
+    }
+
+    private void ClearAvailableModels()
+    {
+        availableModels = [];
     }
 
     private void ResetToDefault()
