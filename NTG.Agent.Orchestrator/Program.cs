@@ -152,6 +152,18 @@ app.UseAuthentication();
 
 app.UseAuthorization();
 
+// SPIKE — Phase 0 AG-UI: block spike endpoints unless AGUI_SPIKE=1. DELETE AFTER PHASE 1.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api/agui-spike") &&
+        Environment.GetEnvironmentVariable("AGUI_SPIKE") != "1")
+    {
+        context.Response.StatusCode = 404;
+        return;
+    }
+    await next();
+});
+
 app.MapControllers();
 
 app.MapDefaultEndpoints();

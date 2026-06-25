@@ -313,6 +313,12 @@ public class AgentService
             {
                 foreach (var item in update.Contents)
                 {
+                    // SPIKE — Phase 0 AG-UI: log content types for tool-call investigation. DELETE AFTER PHASE 1.
+                    if (Environment.GetEnvironmentVariable("AGUI_SPIKE") == "1")
+                    {
+                        _logger.LogInformation("[AGUI_SPIKE] Content type: {ShortName} ({FullName})", item.GetType().Name, item.GetType().FullName);
+                    }
+
                     if (item is TextReasoningContent reasoningContent)
                     {
                         yield return new PromptResponse(reasoningContent.Text, PromptContentType.Thinking);

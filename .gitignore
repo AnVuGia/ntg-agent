@@ -9,6 +9,9 @@ ntgfilestore/
 # .md for AIs
 CLAUDE.md
 
+# Generated code graph artifacts
+.cursor/code-graph/
+
 # Local environment file (often contains secrets)
 .env
 
